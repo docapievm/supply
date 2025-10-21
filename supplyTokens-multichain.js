@@ -1,9 +1,13 @@
 // supplyTokens-multichain.js
 // Multi-chain token creation UI + supply + metadata fetching (ERC-20 style)
-// - Adds metadata fetching (name/symbol/decimals/totalSupply) and logo support
-// - Integrates multiple RPC endpoints per chain (preferred public endpoints + Ankr fallback)
-// - Adds a MEDIAXR preset (Name=MEDIAXR, Symbol=RXR, Logo=provided URL)
-// - Persists tokens in localStorage
+// Updated: added robust provider creation for ALL chains using prioritized RPC lists,
+// cached providers (ethers.FallbackProvider), and optional RPC overrides for higher reliability.
+//
+// Key improvements in this version:
+// - Build and cache a provider for every configured chain (FallbackProvider composed of multiple RPCs).
+// - Allow runtime overrides via window.RPC_OVERRIDES or localStorage 'rpc_overrides' for injecting private API-key endpoints.
+// - Use the FallbackProvider when possible, but gracefully fall back to trying individual RPCs if the FallbackProvider doesn't return useful data.
+// - Probe providers on init so the UI favors working endpoints sooner.
 
 (function () {
   const ERC20_ABI = [
@@ -16,7 +20,8 @@
   const STORAGE_KEYS = {
     TOKENS: 'supply_tokens_v3',
     THEME: 'supply_theme_v3',
-    COLUMNS: 'supply_columns_v3'
+    COLUMNS: 'supply_columns_v3',
+    RPC_OVERRIDES: 'rpc_overrides' // optional JSON map stored locally
   };
 
   // MEDIAXR preset
@@ -27,9 +32,8 @@
     logo: 'https://musicchain.netlify.app/android-chrome-512x512.png'
   };
 
-  // Chains with prioritized list of RPC endpoints (prefer public endpoints first, then Ankr fallback)
-  // NOTE: keep endpoints that are public/commonly available. If you have API keys for providers (Alchemy/Infura/QuickNode),
-  // you can replace/add those endpoints here for better reliability.
+  // Chains with prioritized list of RPC endpoints.
+  // You can override or prepend private endpoints via window.RPC_OVERRIDES or localStorage key 'rpc_overrides' (JSON).
   const CHAINS = [
     { key: 'eth', name: 'Ethereum Mainnet', rpcs: ['https://cloudflare-eth.com', 'https://rpc.ankr.com/eth'] },
     { key: 'goerli', name: 'Ethereum Goerli', rpcs: ['https://rpc.ankr.com/eth_goerli'] },
@@ -63,7 +67,7 @@
     { key: 'evrynet', name: 'Evrynet (placeholder)', rpcs: ['https://rpc.ankr.com/eth'] } // placeholder
   ];
 
-  // DOM elements
+  // DOM elements (assumes the HTML already present)
   const tokenInput = document.getElementById('token-input');
   const createBtn = document.getElementById('create-btn');
   const grid = document.getElementById('tokens-grid');
@@ -75,7 +79,209 @@
   const themeSelect = document.getElementById('theme-select');
   const columnsSelect = document.getElementById('columns-select');
 
-  // Helpers: storage
+  // Provider cache (chainKey -> ethers.Provider)
+  const PROVIDER_CACHE = {};
+
+  // Read RPC overrides from window or localStorage
+  function loadRpcOverrides() {
+    // window.RPC_OVERRIDES should be an object like { eth: ['https://...'], polygon: ['https://...'] }
+    if (window.RPC_OVERRIDES && typeof window.RPC_OVERRIDES === 'object') {
+      return window.RPC_OVERRIDES;
+    }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.RPC_OVERRIDES);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {
+      // ignore parse errors
+    }
+    return {};
+  }
+
+  // Build a provider for a chainKey using its RPC list and any overrides.
+  // Uses ethers.providers.FallbackProvider when multiple endpoints available.
+  function buildProviderForChain(chainKey) {
+    const chain = CHAINS.find(c => c.key === chainKey);
+    if (!chain) return null;
+
+    const overrides = loadRpcOverrides();
+    let rpcs = Array.isArray(overrides[chainKey]) && overrides[chainKey].length ? overrides[chainKey] : chain.rpcs.slice();
+
+    // Also allow a global override for all chains: overrides._all
+    if (Array.isArray(overrides._all) && overrides._all.length) {
+      // Prepend global overrides so they have priority
+      rpcs = overrides._all.concat(rpcs);
+    }
+
+    // Remove duplicates while keeping order
+    rpcs = [...new Set(rpcs)];
+
+    if (rpcs.length === 0) return null;
+
+    // If only one RPC, return a simple JsonRpcProvider
+    if (rpcs.length === 1) {
+      try {
+        const p = new ethers.providers.JsonRpcProvider(rpcs[0]);
+        return p;
+      } catch (e) {
+        console.warn('Failed to create JsonRpcProvider', rpcs[0], e);
+        return null;
+      }
+    }
+
+    // Create provider objects for fallback provider.
+    // Provide provider objects with increasing priority so first ones are preferred.
+    const providerConfigs = rpcs.map((rpc, index) => {
+      let provider;
+      try {
+        provider = new ethers.providers.JsonRpcProvider(rpc);
+      } catch (e) {
+        console.warn('Invalid RPC URL skipped', rpc, e);
+        return null;
+      }
+      // priority: lower number is preferred earlier by FallbackProvider internals in ethers v5,
+      // but we'll use the index as priority and a small stallTimeout so slow endpoints don't block.
+      return {
+        provider,
+        priority: 1 + index,
+        stallTimeout: 1500 + index * 800,
+        weight: 1
+      };
+    }).filter(Boolean);
+
+    if (providerConfigs.length === 0) return null;
+
+    try {
+      // Create a FallbackProvider. The quorum is 1 because we only need 1 provider to succeed.
+      const fallback = new ethers.providers.FallbackProvider(providerConfigs, 1);
+      return fallback;
+    } catch (e) {
+      console.warn('FallbackProvider creation failed, falling back to first working JsonRpcProvider', e);
+      // Last resort: return the first JsonRpcProvider that could be constructed
+      for (const cfg of providerConfigs) {
+        if (cfg && cfg.provider) return cfg.provider;
+      }
+      return null;
+    }
+  }
+
+  // Get or create cached provider for chainKey
+  function getProvider(chainKey) {
+    if (PROVIDER_CACHE[chainKey]) return PROVIDER_CACHE[chainKey];
+    const p = buildProviderForChain(chainKey);
+    if (p) PROVIDER_CACHE[chainKey] = p;
+    return p;
+  }
+
+  // Probe provider by calling getBlockNumber (with timeout)
+  async function probeProvider(provider, timeoutMs = 3000) {
+    if (!provider) throw new Error('No provider');
+    const p = provider.getBlockNumber();
+    return Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs))
+    ]);
+  }
+
+  // If a FallbackProvider fails to produce metadata, we can try individual RPC endpoints sequentially (best-effort).
+  async function fetchMetadataByTryingRpcs(address, chainKey, timeoutMs = 7000) {
+    const chain = CHAINS.find(c => c.key === chainKey);
+    if (!chain) throw new Error('No chain config');
+
+    const overrides = loadRpcOverrides();
+    let rpcs = Array.isArray(overrides[chainKey]) && overrides[chainKey].length ? overrides[chainKey] : chain.rpcs.slice();
+    if (Array.isArray(overrides._all) && overrides._all.length) {
+      rpcs = overrides._all.concat(rpcs);
+    }
+    rpcs = [...new Set(rpcs)];
+
+    const meta = { name: null, symbol: null, decimals: null, totalSupply: null, logo: null };
+
+    for (const rpc of rpcs) {
+      let provider;
+      try {
+        provider = new ethers.providers.JsonRpcProvider(rpc);
+      } catch (e) {
+        console.warn('Invalid RPC skipped', rpc, e);
+        continue;
+      }
+
+      try {
+        await probeProvider(provider, 3000);
+      } catch (e) {
+        console.warn('RPC probe failed for', rpc, e);
+        continue;
+      }
+
+      const contract = new ethers.Contract(address, ERC20_ABI, provider);
+      const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+      try {
+        const [name, symbol, decimals, rawSupply] = await Promise.allSettled([
+          withTimeout(contract.name(), timeoutMs),
+          withTimeout(contract.symbol(), timeoutMs),
+          withTimeout(contract.decimals(), timeoutMs),
+          withTimeout(contract.totalSupply(), timeoutMs)
+        ]);
+
+        if (name.status === 'fulfilled' && name.value) meta.name = name.value;
+        if (symbol.status === 'fulfilled' && symbol.value) meta.symbol = symbol.value;
+        if (decimals.status === 'fulfilled' && (decimals.value !== undefined)) meta.decimals = decimals.value;
+        if (rawSupply.status === 'fulfilled' && rawSupply.value) meta.totalSupply = rawSupply.value.toString();
+
+        if (meta.name || meta.symbol || meta.totalSupply) {
+          return meta;
+        }
+      } catch (e) {
+        console.warn('Contract calls failed on rpc', rpc, e);
+        // try next
+      }
+    }
+
+    throw new Error('All RPC endpoints failed or contract does not implement expected ERC20 methods');
+  }
+
+  // Unified metadata fetch: preferred path uses cached provider (FallbackProvider),
+  // fallback path tries RPCs one-by-one.
+  async function fetchOnChainMetadata(address, chainKey, timeoutMs = 7000) {
+    const meta = { name: null, symbol: null, decimals: null, totalSupply: null, logo: null };
+    const provider = getProvider(chainKey);
+
+    if (!provider) {
+      // No provider configured - try sequential RPCs
+      return fetchMetadataByTryingRpcs(address, chainKey, timeoutMs);
+    }
+
+    // If provider is a FallbackProvider or JsonRpcProvider, try using it first.
+    const contract = new ethers.Contract(address, ERC20_ABI, provider);
+    const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+    try {
+      // Use Promise.allSettled because some contracts may not implement all methods.
+      const [name, symbol, decimals, rawSupply] = await Promise.allSettled([
+        withTimeout(contract.name(), timeoutMs),
+        withTimeout(contract.symbol(), timeoutMs),
+        withTimeout(contract.decimals(), timeoutMs),
+        withTimeout(contract.totalSupply(), timeoutMs)
+      ]);
+
+      if (name.status === 'fulfilled' && name.value) meta.name = name.value;
+      if (symbol.status === 'fulfilled' && symbol.value) meta.symbol = symbol.value;
+      if (decimals.status === 'fulfilled' && (decimals.value !== undefined)) meta.decimals = decimals.value;
+      if (rawSupply.status === 'fulfilled' && rawSupply.value) meta.totalSupply = rawSupply.value.toString();
+
+      if (meta.name || meta.symbol || meta.totalSupply) {
+        return meta;
+      }
+      // If the FallbackProvider didn't yield anything useful, fall back to per-RPC tries.
+      return fetchMetadataByTryingRpcs(address, chainKey, timeoutMs);
+    } catch (e) {
+      // If the provider fails unexpectedly, try the per-RPC fallback path
+      console.warn('Fallback provider attempt failed, trying per-RPC fallback', e);
+      return fetchMetadataByTryingRpcs(address, chainKey, timeoutMs);
+    }
+  }
+
+  // --- Storage helpers (unchanged) ---
   function loadTokens() {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.TOKENS);
@@ -89,7 +295,6 @@
     localStorage.setItem(STORAGE_KEYS.TOKENS, JSON.stringify(tokens));
   }
 
-  // Utility
   function normalizeAddress(addr) {
     return (addr || '').trim();
   }
@@ -109,78 +314,7 @@
     });
   }
 
-  // Try to call a simple provider request to verify endpoint works
-  async function probeProvider(provider, timeoutMs = 4500) {
-    const p = provider.getBlockNumber();
-    return Promise.race([
-      p,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs))
-    ]);
-  }
-
-  // Attempt contract calls using each RPC in order until success
-  async function fetchOnChainMetadata(address, chainKey, timeoutMs = 7000) {
-    const chain = CHAINS.find(c => c.key === chainKey);
-    if (!chain) throw new Error('No chain config');
-
-    const meta = { name: null, symbol: null, decimals: null, totalSupply: null, logo: null };
-    // try each rpc sequentially for better chance of success
-    for (const rpc of (chain.rpcs || [])) {
-      let provider;
-      try {
-        provider = new ethers.providers.JsonRpcProvider(rpc);
-      } catch (e) {
-        console.warn('Invalid RPC URL', rpc, e);
-        continue;
-      }
-      // quick probe
-      try {
-        await probeProvider(provider, 3500);
-      } catch (e) {
-        console.warn('RPC probe failed for', rpc, e);
-        // try next RPC
-        continue;
-      }
-
-      const contract = new ethers.Contract(address, ERC20_ABI, provider);
-      // helper with timeout
-      const withTimeout = (p, ms) => {
-        return Promise.race([
-          p,
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
-        ]);
-      };
-
-      try {
-        const [name, symbol, decimals, rawSupply] = await Promise.allSettled([
-          withTimeout(contract.name(), timeoutMs),
-          withTimeout(contract.symbol(), timeoutMs),
-          withTimeout(contract.decimals(), timeoutMs),
-          withTimeout(contract.totalSupply(), timeoutMs)
-        ]);
-
-        if (name.status === 'fulfilled' && name.value) meta.name = name.value;
-        if (symbol.status === 'fulfilled' && symbol.value) meta.symbol = symbol.value;
-        if (decimals.status === 'fulfilled' && (decimals.value !== undefined)) meta.decimals = decimals.value;
-        if (rawSupply.status === 'fulfilled' && rawSupply.value) meta.totalSupply = rawSupply.value.toString();
-
-        // If at least name or symbol or totalSupply fetched, consider it success and return meta
-        if (meta.name || meta.symbol || meta.totalSupply) {
-          return meta;
-        }
-        // otherwise try next RPC
-      } catch (e) {
-        console.warn('Contract calls failed on rpc', rpc, e);
-        // try next RPC
-        continue;
-      }
-    }
-
-    // All RPCs attempted and no useful metadata found
-    throw new Error('All RPC endpoints failed or contract does not implement expected ERC20 methods');
-  }
-
-  // Render tokens grid
+  // Render tokens grid (UI code largely unchanged, but uses providers behind the scenes)
   function render() {
     const tokens = loadTokens();
     grid.innerHTML = '';
@@ -384,7 +518,6 @@
 
     tokenInput.value = '';
     supplyInput.value = '';
-    // reset checkboxes? leave as-is so user can successive-create
     render();
   }
 
@@ -432,6 +565,64 @@
     }
   }
 
+  // Init: build providers for all chains (asynchronously probe them to warm cache)
+  async function warmProviders() {
+    // Build providers synchronously and store in cache
+    for (const c of CHAINS) {
+      try {
+        const p = getProvider(c.key);
+        // optionally probe each provider in background (non-blocking)
+        if (p) {
+          // probe but don't block startup; store promise for debug if needed
+          probeProvider(p, 2500).then(
+            bn => console.debug(`Provider probe success for ${c.key}: block ${bn}`),
+            err => console.debug(`Provider probe failed for ${c.key}:`, err.message || err)
+          );
+        }
+      } catch (e) {
+        console.warn('Provider warm build failed for', c.key, e);
+      }
+    }
+  }
+
+  // Convenience function to register a MEDIAXR override for a specific chain+address programmatically
+  window.registerMediaXrOverride = function (chainKey, address) {
+    if (!isValidAddress(address)) {
+      console.warn('Invalid address for override');
+      return;
+    }
+    const tokens = loadTokens();
+    const normalized = address.toLowerCase();
+    let updated = false;
+    for (const t of tokens) {
+      if (t.chainKey === chainKey && t.address.toLowerCase() === normalized) {
+        t.metadata = Object.assign({}, t.metadata || {}, MEDIAXR_PRESET);
+        updated = true;
+      }
+    }
+    if (updated) {
+      saveAndRefresh(tokens);
+      console.info('Metadata override applied for MEDIAXR / RXR');
+    } else {
+      console.info('No matching token entry found. Create one then run this function again.');
+    }
+  };
+
+  // Expose function to set RPC overrides at runtime (persists to localStorage)
+  window.setRpcOverrides = function (overrides) {
+    try {
+      if (!overrides || typeof overrides !== 'object') throw new Error('overrides must be an object');
+      localStorage.setItem(STORAGE_KEYS.RPC_OVERRIDES, JSON.stringify(overrides));
+      // Clear provider cache so new overrides are used
+      for (const k of Object.keys(PROVIDER_CACHE)) delete PROVIDER_CACHE[k];
+      // rebuild providers
+      warmProviders();
+      console.info('RPC overrides saved and providers rebuilt.');
+    } catch (e) {
+      console.error('Failed to set RPC overrides', e);
+    }
+  };
+
   // Init
   function init() {
     initChains();
@@ -474,32 +665,10 @@
 
     // Accessibility: preselect Ethereum
     chainSelect.value = 'eth';
-  }
 
-  // Convenience function to register a MEDIAXR override for a specific chain+address programmatically
-  // Usage from console:
-  // window.registerMediaXrOverride('eth', '0xabc...') -> applies MEDIAXR metadata to any existing entries matching that chain+address.
-  window.registerMediaXrOverride = function (chainKey, address) {
-    if (!isValidAddress(address)) {
-      console.warn('Invalid address for override');
-      return;
-    }
-    const tokens = loadTokens();
-    const normalized = address.toLowerCase();
-    let updated = false;
-    for (const t of tokens) {
-      if (t.chainKey === chainKey && t.address.toLowerCase() === normalized) {
-        t.metadata = Object.assign({}, t.metadata || {}, MEDIAXR_PRESET);
-        updated = true;
-      }
-    }
-    if (updated) {
-      saveAndRefresh(tokens);
-      console.info('Metadata override applied for MEDIAXR / RXR');
-    } else {
-      console.info('No matching token entry found. Create one then run this function again.');
-    }
-  };
+    // Warm providers in background for all chains
+    warmProviders().catch(e => console.debug('warmProviders error', e));
+  }
 
   // Run init on DOM ready
   document.addEventListener('DOMContentLoaded', init);

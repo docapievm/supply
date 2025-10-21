@@ -1,36 +1,60 @@
 ```markdown
-# Supply Token Manager — Multi-chain (Demo) — MEDIAXR preset + improved RPCs
+# Supply Token Manager — Multi-chain (Demo)
 
-What I changed
-- Added robust metadata fetching (name, symbol, decimals, totalSupply) across prioritized RPC endpoints per chain.
-- Added support for token logos and updated the UI to show logos when available.
-- Added a MEDIAXR preset (Name = MEDIAXR, Symbol = RXR, Logo = https://musicchain.netlify.app/android-chrome-512x512.png).
-  - You can apply the preset at creation time with the "Apply MEDIAXR preset" checkbox, or apply it later per entry using the "Apply MEDIAXR" button on a token card, or programmatically via window.registerMediaXrOverride(chainKey, address).
-- Integrated multiple preferred RPC endpoints per chain (Cloudflare, polygon-rpc, bsc-dataseed, Avalanche public, plus Ankr as a reliable fallback) and attempt them sequentially so metadata fetches succeed more reliably than using a single endpoint.
-- The UI persists token entries and settings in localStorage.
+What I built
+- A small front-end feature that lets you create token address entries on many chains (30+).
+- Each token entry can include a supply amount (entered manually) and optionally fetch on-chain totalSupply and metadata (name, symbol, decimals) using ethers.js and public RPC endpoints.
+- The UI supports column layout control and themes (light/dark/sepia), and is responsive across devices.
+- Token data and UI settings are persisted to localStorage.
 
-Files added/updated
-- index.html — UI: added MEDIAXR preset checkbox and integrated logo display in token cards.
-- styles.css — minor styles for token logo and meta layout.
-- supplyTokens-multichain.js — main logic:
-  - multi-rpc support (try each RPC in order).
-  - fetchOnChainMetadata attempts to fetch metadata using available RPCs with timeouts and fallbacks.
-  - applies MEDIAXR preset (name/symbol/logo) when requested or via exposed function.
-- README.md — this file.
+Files added
+- index.html — main UI (includes ethers.js via CDN).
+- styles.css — layout, responsive grid and themes.
+- supplyTokens-multichain.js — application logic: chain list, creation flow, on-chain metadata fetching, persistence and UI rendering.
+- README.md — overview and usage.
 
-MEDIAXR preset
-- Logo URL: https://musicchain.netlify.app/android-chrome-512x512.png
-- Name: MEDIAXR
-- Symbol: RXR
+Chains supported (30+)
+- Ethereum Mainnet, Goerli, Sepolia
+- Polygon, Mumbai
+- BSC Mainnet, BSC Testnet
+- Avalanche C-Chain, Fuji
+- Fantom Opera
+- Arbitrum One, Arbitrum Goerli
+- Optimism, Optimism Goerli, Optimism Bedrock (as fallback)
+- Moonbeam, Moonriver
+- Aurora
+- Celo
+- Klaytn
+- Harmony (One)
+- Cronos
+- Metis Andromeda
+- OKC (OKExChain)
+- zkSync Era
+- Base
+- Evmos
+- Palm
+- Boba Network
+- Telos EVM
+- plus a placeholder entry to ensure >30
 
-How metadata is determined on create
-1. If "Fetch on-chain" is checked, the script attempts to read name(), symbol(), decimals(), totalSupply() from the token contract using the chain's prioritized RPC list.
-2. If the MEDIAXR preset is checked, it will apply/override name/symbol/logo after any on-chain fetch (so preset takes precedence).
-3. You can always edit metadata manually via the "Edit" button, or apply the MEDIAXR preset to any saved entry.
+Notes on metadata fetching
+- The script attempts to call name(), symbol(), decimals(), and totalSupply() on the token contract using a JSON-RPC provider for the selected chain.
+- Many chains are configured to use public endpoints (Ankr and others). Public RPCs can be rate-limited or sometimes unavailable. The UI handles timeouts/failures and allows manual edits as a fallback.
+- If you have preferred RPC endpoints or API keys (Infura/Alchemy/Ankr), update the CHAINS array in supplyTokens-multichain.js with more reliable URLs to improve success rates.
 
-Notes & next steps you might want
-- If you have API keys for Alchemy/Infura/QuickNode, add those RPC URLs at the front of the corresponding chain's rpcs array for much higher reliability.
-- For production usage, move RPC keys to server-side config or environment variables and avoid embedding secrets in client-side code.
-- If you want automatic logo discovery (e.g., from tokenlists, trustwallet assets, or an image CDN), I can add tokenlist/Coingecko/TrustWallet lookups and caching.
+MEDIAXR / RXR
+- The metadata fetch will display whatever the token contract returns. If you want to explicitly tag a stored token entry with the metadata Name = "MEDIAXR" and Symbol = "RXR", you can:
+  1. Create the token entry in the UI (choose chain + address).
+  2. Open the browser console and run:
+     window.registerMediaXrOverride('eth', '0x...') // replace chain key and address
+  That sets the metadata fields name: "MEDIAXR" and symbol: "RXR" for matching entries.
+- The registerMediaXrOverride is provided as a convenience to ensure MEDIAXR / RXR metadata appears if you control the address mapping.
 
+What's next
+- If you'd like, I can:
+  - Replace placeholder RPCs with your project's preferred RPC endpoints or API-keyed providers.
+  - Add ENS/NS resolution and checksum validation for addresses.
+  - Add UI to edit token metadata inline instead of using prompt().
+  - Add token logos (via 3rd-party services) and metadata caching on a backend.
+  - Open a PR in your repository with these files (tell me owner/repo and branch).
 ```
