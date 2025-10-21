@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Supply Token Manager — Multi-chain</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="theme-light">
+  <header class="app-header">
+    <h1>Supply Token Manager</h1>
+    <div class="controls">
+      <label for="theme-select" class="control-label">Theme</label>
+      <select id="theme-select" aria-label="Choose theme" class="select">
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+        <option value="sepia">Sepia</option>
+      </select>
+
+      <label for="columns-select" class="control-label">Columns</label>
+      <select id="columns-select" aria-label="Choose columns" class="select">
+        <option value="auto">Auto</option>
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="add-token">
+      <h2>Create Token Address</h2>
+
+      <label for="chain-select">Chain</label>
+      <select id="chain-select" class="select full">
+        <!-- populated by JS -->
+      </select>
+
+      <label for="token-input">Token address</label>
+      <div class="input-row">
+        <input id="token-input" placeholder="0x..." aria-label="Token address" />
+      </div>
+
+      <label for="supply-input">Supply amount (optional)</label>
+      <div class="input-row">
+        <input id="supply-input" placeholder="Enter numeric supply (e.g. 1000000) or leave blank" />
+        <button id="create-btn" class="btn">Create</button>
+      </div>
+
+      <div class="row-gap">
+        <label><input type="checkbox" id="fetch-onchain" /> Fetch on-chain totalSupply & metadata when creating (may fail if RPC restricted)</label>
+      </div>
+
+      <div class="row-gap">
+        <label><input type="checkbox" id="apply-mediaxr" /> Apply MEDIAXR preset (Name = MEDIAXR, Symbol = RXR, Logo)</label>
+      </div>
+
+      <p class="hint">You can create token entries for many chains. Supply amount can be entered manually or fetched from chain if the contract supports totalSupply(). Use the MEDIAXR preset to tag the entry with the requested metadata (name/symbol/logo).</p>
+    </section>
+
+    <section class="tokens-section">
+      <h2>Tokens</h2>
+      <div id="tokens-grid" class="tokens-grid" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <small>Local-only demo. Tokens and settings stored in localStorage. On-chain metadata fetched via public RPC endpoints when available.</small>
+  </footer>
+
+  <!-- ethers v5 for browser -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
+  <script src="supplyTokens-multichain.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+:root{
+  --bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --card-bg: #f9fafb;
+  --accent: #2563eb;
+  --radius: 8px;
+  --gap: 12px;
+  --columns: 2; /* default */
+  --max-width: 1100px;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.container{
+  width: 100%;
+  max-width: var(--max-width);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.app-header{
+  width: 100%;
+  padding: 18px 20px;
+  box-sizing: border-box;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(15,23,42,0.06);
+}
+
+.app-header h1 { margin: 0; font-size: 1.125rem; }
+
+.controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+.control-label { font-size: 0.8rem; color: var(--muted); margin-right: 6px; }
+
+.select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15,23,42,0.08);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.select.full { width: 100%; margin-top: 6px; margin-bottom: 8px; }
+
+.add-token { margin-top: 20px; }
+
+.input-row { display: flex; gap: 8px; margin-top: 6px; }
+input[type="text"], input, #token-input, #supply-input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(15,23,42,0.08);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.btn {
+  padding: 8px 12px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn:active { transform: translateY(1px); }
+
+.hint { margin: 6px 0 0; color: var(--muted); font-size: 0.85rem; }
+
+.tokens-section { margin-top: 20px; }
+
+.tokens-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(var(--columns), 1fr);
+  gap: var(--gap);
+}
+
+/* Token card */
+.token-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-shadow: 0 1px 1px rgba(15,23,42,0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  word-break: break-all;
+}
+.token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.token-address { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92rem; color: var(--text); }
+.token-meta { font-weight: 600; display:flex; align-items:center; gap:8px; }
+.token-actions { display: flex; gap: 8px; align-items:center; }
+
+.token-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* compact meta row (logo + text) */
+.meta-text { display:flex; flex-direction:column; line-height:1; }
+.meta-title { font-weight:700; font-size:0.95rem; }
+.meta-sub { font-size:0.85rem; color:var(--muted); }
+
+/* small helpers */
+.icon-btn {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15,23,42,0.06);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.small { font-size: 0.85rem; color: var(--muted); }
+
+/* footer */
+.app-footer{
+  width: 100%;
+  max-width: var(--max-width);
+  padding: 14px 20px;
+  box-sizing: border-box;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+/* THEMES */
+.theme-light {
+  --bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --card-bg: #f9fafb;
+  --accent: #2563eb;
+}
+.theme-dark {
+  --bg: #0b1220;
+  --text: #e6eef8;
+  --muted: #9aa9bf;
+  --card-bg: #071025;
+  --accent: #3b82f6;
+}
+.theme-sepia {
+  --bg: #f7efe6;
+  --text: #3b2f2f;
+  --muted: #7b6b60;
+  --card-bg: #fff6ee;
+  --accent: #b7791f;
+}
+
+/* RESPONSIVE: when columns=auto rely on breakpoints */
+@media (max-width: 640px) {
+  :root { --columns: 1; }
+}
+@media (min-width: 641px) and (max-width: 960px) {
+  :root { --columns: 2; }
+}
+@media (min-width: 961px) and (max-width: 1300px) {
+  :root { --columns: 3; }
+}
+@media (min-width: 1301px) {
+  :root { --columns: 4; }
+}
+
+/* allow explicit override from JS by setting style --columns on tokens-grid */
+
+.row-gap { margin-top: 10px; margin-bottom: 6px; }
